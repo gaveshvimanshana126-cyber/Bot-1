@@ -100,11 +100,27 @@ function getTargets(mek, q) {
   return [...new Set(list.map((j) => jidNormalizedUser(j)))];
 }
 
+// ---- LID-safe admin check: compares plain numbers across id / jid / phoneNumber / lid ----
+const idsOf = (p) => [p.id, p.jid, p.phoneNumber, p.lid].filter(Boolean).map(num);
+
+async function adminStatus(sock, from, mek, ex) {
+  const md = (await sock.groupMetadata(from).catch(() => null)) || ex.groupMetadata || {};
+  const adminIds = new Set((md.participants || []).filter((p) => p.admin).flatMap(idsOf));
+  const botIds = [sock.user?.id, sock.user?.lid, ex.botNumber2].filter(Boolean).map(num);
+  const senderIds = [mek.key?.participant, mek.key?.participantAlt, ex.sender].filter(Boolean).map(num);
+  return {
+    isBotAdmins: botIds.some((n) => adminIds.has(n)),
+    isAdmins: senderIds.some((n) => adminIds.has(n)),
+  };
+}
+
 // common checks. returns true if OK to continue
-function guard({ isGroup, isAdmins, isBotAdmins, isOwner, reply }, { admin = true, botAdmin = true } = {}) {
-  if (!isGroup) { reply('❌ This command only works in groups.'); return false; }
-  if (admin && !(isAdmins || isOwner)) { reply('❌ Only group admins can use this.'); return false; }
-  if (botAdmin && !isBotAdmins) { reply('❌ Make the bot a group admin first.'); return false; }
+async function guard(sock, mek, ex, { admin = true, botAdmin = true } = {}) {
+  if (!ex.isGroup) { ex.reply('❌ This command only works in groups.'); return false; }
+  if (!admin && !botAdmin) return true;
+  const st = await adminStatus(sock, ex.from, mek, ex);
+  if (admin && !(st.isAdmins || ex.isOwner)) { ex.reply('❌ Only group admins can use this.'); return false; }
+  if (botAdmin && !st.isBotAdmins) console.log('[group.js] bot admin not detected by id match, trying anyway:', num(sock.user?.id));
   return true;
 }
 
@@ -207,10 +223,11 @@ function init(sock) {
 
         const meta = await sock.groupMetadata(from).catch(() => null);
         if (!meta) continue;
-        const admins = meta.participants.filter((p) => p.admin).map((p) => jidNormalizedUser(p.id));
+        const adminIds = new Set(meta.participants.filter((p) => p.admin).flatMap(idsOf));
         const sender = jidNormalizedUser(mek.key.participant);
-        const botId = jidNormalizedUser(sock.user.id);
-        if (admins.includes(sender) || !admins.includes(botId)) continue; // skip admins / need bot admin
+        const senderIds = [mek.key.participant, mek.key.participantAlt].filter(Boolean).map(num);
+        const botIds = [sock.user?.id, sock.user?.lid].filter(Boolean).map(num);
+        if (senderIds.some((n) => adminIds.has(n)) || !botIds.some((n) => adminIds.has(n))) continue; // skip admins / need bot admin
 
         await sock.sendMessage(from, { delete: mek.key });
         await sock.sendMessage(from, { text: `🚫 @${num(sender)} group links are not allowed. Removed.`, mentions: [sender] });
@@ -255,17 +272,17 @@ async (sock, mek, m, { q, isOwner, reply }) => {
 // .kick  (reply / @mention / number)
 cmd({ pattern: 'kick', alias: ['remove'], desc: 'Remove a member. Reply, @mention or give number', category: 'group', react: '🦶', filename: __filename },
 async (sock, mek, m, ex) => {
-  if (!guard(ex)) return;
+  if (!(await guard(sock, mek, ex))) return;
   const t = getTargets(mek, ex.q).filter((j) => j !== ex.botNumber2);
   if (!t.length) return ex.reply('❗ Reply to / @mention the member.');
-  for (const j of t) await sock.groupParticipantsUpdate(ex.from, [j], 'remove').catch(() => ex.reply(`❌ Could not remove @${num(j)}`));
+  for (const j of t) await sock.groupParticipantsUpdate(ex.from, [j], 'remove').catch(() => ex.reply(`❌ Could not remove @${num(j)}. Is the bot a group admin?`));
   sock.sendMessage(ex.from, { text: `✅ Removed ${t.map((j) => '@' + num(j)).join(', ')}`, mentions: t }, { quoted: mek });
 });
 
 // .add 94771234567
 cmd({ pattern: 'add', desc: 'Add a member. Eg: .add 94771234567', category: 'group', react: '➕', filename: __filename },
 async (sock, mek, m, ex) => {
-  if (!guard(ex)) return;
+  if (!(await guard(sock, mek, ex))) return;
   const n = (ex.q || '').replace(/\D/g, '');
   if (n.length < 7) return ex.reply('❗ Usage: .add 94771234567');
   try {
@@ -279,10 +296,10 @@ async (sock, mek, m, ex) => {
 for (const [pattern, action, icon, word] of [['promote', 'promote', '⬆️', 'promoted to admin'], ['demote', 'demote', '⬇️', 'demoted from admin']]) {
   cmd({ pattern, desc: `${pattern[0].toUpperCase() + pattern.slice(1)} a member. Reply or @mention`, category: 'group', react: icon, filename: __filename },
   async (sock, mek, m, ex) => {
-    if (!guard(ex)) return;
+    if (!(await guard(sock, mek, ex))) return;
     const t = getTargets(mek, ex.q);
     if (!t.length) return ex.reply('❗ Reply to / @mention the member.');
-    await sock.groupParticipantsUpdate(ex.from, t, action).catch(() => ex.reply('❌ Failed.'));
+    await sock.groupParticipantsUpdate(ex.from, t, action).catch(() => ex.reply('❌ Failed. Make sure the bot is a group admin.'));
     sock.sendMessage(ex.from, { text: `✅ ${t.map((j) => '@' + num(j)).join(', ')} ${word}.`, mentions: t }, { quoted: mek });
   });
 }
@@ -290,7 +307,7 @@ for (const [pattern, action, icon, word] of [['promote', 'promote', '⬆️', 'p
 // .tagall [message]
 cmd({ pattern: 'tagall', alias: ['everyone'], desc: 'Mention everyone in the group', category: 'group', react: '📢', filename: __filename },
 async (sock, mek, m, ex) => {
-  if (!guard(ex, { botAdmin: false })) return;
+  if (!(await guard(sock, mek, ex, { botAdmin: false }))) return;
   const ids = ex.participants.map((p) => p.id);
   const text = `📢 *${ex.q || 'Attention everyone!'}*\n\n` + ids.map((j, i) => `${i + 1}. @${num(j)}`).join('\n');
   sock.sendMessage(ex.from, { text, mentions: ids }, { quoted: mek });
@@ -299,7 +316,7 @@ async (sock, mek, m, ex) => {
 // .hidetag <message>  (silent mention)
 cmd({ pattern: 'hidetag', alias: ['htag'], desc: 'Mention everyone without showing the list', category: 'group', react: '👻', filename: __filename },
 async (sock, mek, m, ex) => {
-  if (!guard(ex, { botAdmin: false })) return;
+  if (!(await guard(sock, mek, ex, { botAdmin: false }))) return;
   if (!ex.q) return ex.reply('❗ Usage: .hidetag your message');
   sock.sendMessage(ex.from, { text: ex.q, mentions: ex.participants.map((p) => p.id) });
 });
@@ -307,49 +324,49 @@ async (sock, mek, m, ex) => {
 // .mute / .unmute
 cmd({ pattern: 'mute', alias: ['close'], desc: 'Only admins can send messages', category: 'group', react: '🔇', filename: __filename },
 async (sock, mek, m, ex) => {
-  if (!guard(ex)) return;
-  await sock.groupSettingUpdate(ex.from, 'announcement').catch(() => ex.reply('❌ Failed.'));
+  if (!(await guard(sock, mek, ex))) return;
+  await sock.groupSettingUpdate(ex.from, 'announcement').catch(() => ex.reply('❌ Failed. Make sure the bot is a group admin.'));
   ex.reply('🔇 Group muted — only admins can send messages.');
 });
 cmd({ pattern: 'unmute', alias: ['open'], desc: 'Everyone can send messages', category: 'group', react: '🔊', filename: __filename },
 async (sock, mek, m, ex) => {
-  if (!guard(ex)) return;
-  await sock.groupSettingUpdate(ex.from, 'not_announcement').catch(() => ex.reply('❌ Failed.'));
+  if (!(await guard(sock, mek, ex))) return;
+  await sock.groupSettingUpdate(ex.from, 'not_announcement').catch(() => ex.reply('❌ Failed. Make sure the bot is a group admin.'));
   ex.reply('🔊 Group unmuted — everyone can send messages.');
 });
 
 // .link / .revoke
 cmd({ pattern: 'link', alias: ['grouplink'], desc: 'Get the group invite link', category: 'group', react: '🔗', filename: __filename },
 async (sock, mek, m, ex) => {
-  if (!guard(ex)) return;
+  if (!(await guard(sock, mek, ex))) return;
   const code = await sock.groupInviteCode(ex.from).catch(() => null);
   ex.reply(code ? `🔗 https://chat.whatsapp.com/${code}` : '❌ Could not get the link.');
 });
 cmd({ pattern: 'revoke', alias: ['resetlink'], desc: 'Reset the group invite link', category: 'group', react: '♻️', filename: __filename },
 async (sock, mek, m, ex) => {
-  if (!guard(ex)) return;
-  await sock.groupRevokeInvite(ex.from).catch(() => ex.reply('❌ Failed.'));
+  if (!(await guard(sock, mek, ex))) return;
+  await sock.groupRevokeInvite(ex.from).catch(() => ex.reply('❌ Failed. Make sure the bot is a group admin.'));
   ex.reply('♻️ Invite link has been reset. Use .link to get the new one.');
 });
 
 // .setname / .setdesc
 cmd({ pattern: 'setname', desc: 'Change group name', category: 'group', react: '✏️', filename: __filename },
 async (sock, mek, m, ex) => {
-  if (!guard(ex)) return;
+  if (!(await guard(sock, mek, ex))) return;
   if (!ex.q) return ex.reply('❗ Usage: .setname New Name');
-  await sock.groupUpdateSubject(ex.from, ex.q).catch(() => ex.reply('❌ Failed.'));
+  await sock.groupUpdateSubject(ex.from, ex.q).catch(() => ex.reply('❌ Failed. Make sure the bot is a group admin.'));
 });
 cmd({ pattern: 'setdesc', desc: 'Change group description', category: 'group', react: '📝', filename: __filename },
 async (sock, mek, m, ex) => {
-  if (!guard(ex)) return;
+  if (!(await guard(sock, mek, ex))) return;
   if (!ex.q) return ex.reply('❗ Usage: .setdesc New description');
-  await sock.groupUpdateDescription(ex.from, ex.q).catch(() => ex.reply('❌ Failed.'));
+  await sock.groupUpdateDescription(ex.from, ex.q).catch(() => ex.reply('❌ Failed. Make sure the bot is a group admin.'));
 });
 
 // .antilink on|off
 cmd({ pattern: 'antilink', desc: 'Delete WhatsApp group links & remove sender. Eg: .antilink on', category: 'group', react: '🚫', filename: __filename },
 async (sock, mek, m, ex) => {
-  if (!guard(ex)) return;
+  if (!(await guard(sock, mek, ex))) return;
   const a = (ex.q || '').toLowerCase().trim();
   if (!['on', 'off'].includes(a)) return ex.reply(`🚫 *Anti-Link:* ${gs(ex.from).antilink ? 'ON ✅' : 'OFF ❌'}\nUsage: .antilink on | off`);
   gs(ex.from).antilink = a === 'on'; save();
@@ -359,7 +376,7 @@ async (sock, mek, m, ex) => {
 // .welcome on|off
 cmd({ pattern: 'welcome', desc: 'Welcome / goodbye messages. Eg: .welcome on', category: 'group', react: '👋', filename: __filename },
 async (sock, mek, m, ex) => {
-  if (!guard(ex, { botAdmin: false })) return;
+  if (!(await guard(sock, mek, ex, { botAdmin: false }))) return;
   const a = (ex.q || '').toLowerCase().trim();
   if (!['on', 'off'].includes(a)) return ex.reply(`👋 *Welcome msg:* ${gs(ex.from).welcome ? 'ON ✅' : 'OFF ❌'}\nUsage: .welcome on | off`);
   gs(ex.from).welcome = a === 'on'; save();
@@ -369,7 +386,7 @@ async (sock, mek, m, ex) => {
 // .groupinfo
 cmd({ pattern: 'groupinfo', alias: ['ginfo'], desc: 'Show group information', category: 'group', react: 'ℹ️', filename: __filename },
 async (sock, mek, m, ex) => {
-  if (!guard(ex, { admin: false, botAdmin: false })) return;
+  if (!(await guard(sock, mek, ex, { admin: false, botAdmin: false }))) return;
   const md = ex.groupMetadata;
   const admins = ex.groupAdmins.map((j) => '@' + num(j));
   const s = gs(ex.from);
@@ -386,8 +403,22 @@ async (sock, mek, m, ex) => {
 // .admins  (tag admins)
 cmd({ pattern: 'admins', desc: 'Tag all group admins', category: 'group', react: '👑', filename: __filename },
 async (sock, mek, m, ex) => {
-  if (!guard(ex, { admin: false, botAdmin: false })) return;
+  if (!(await guard(sock, mek, ex, { admin: false, botAdmin: false }))) return;
   sock.sendMessage(ex.from, { text: `👑 *Admins*\n\n${ex.groupAdmins.map((j) => '@' + num(j)).join('\n')}`, mentions: ex.groupAdmins }, { quoted: mek });
+});
+
+
+// .botcheck  (shows how the bot sees itself / the admins in this group)
+cmd({ pattern: 'botcheck', desc: 'Debug: show bot & admin ids in this group', category: 'group', react: '🔍', filename: __filename },
+async (sock, mek, m, ex) => {
+  if (!ex.isGroup) return ex.reply('❌ Use this inside a group.');
+  const md = (await sock.groupMetadata(ex.from).catch(() => null)) || {};
+  const st = await adminStatus(sock, ex.from, mek, ex);
+  const admins = (md.participants || []).filter((p) => p.admin).map((p) => idsOf(p).join(' / '));
+  ex.reply(
+    `🔍 *Bot check*\n\n🤖 Bot id: ${sock.user?.id}\n🆔 Bot lid: ${sock.user?.lid || 'none'}\n` +
+    `✅ Bot admin detected: ${st.isBotAdmins ? 'YES' : 'NO'}\n👤 You admin: ${st.isAdmins ? 'YES' : 'NO'}\n\n*Admins in group:*\n${admins.join('\n') || 'none'}`
+  );
 });
 
 module.exports = { init };
