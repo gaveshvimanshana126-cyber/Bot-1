@@ -5,7 +5,7 @@ const axios = require('axios');
 const API_BASE = 'https://api.chamindu.site';
 const API_KEY = process.env.CINE_API_KEY || '';
 const DEFAULT_IMAGE = 'https://api.chamindu.site/logo.png';
-const FOOTER = `\n\n> 🎭 𝗖𝗛𝗔𝗠𝗔 𝗖𝗜𝗡𝗘 𝗛𝗨𝗕 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 🇨🇭𝗔𝗠𝗔 𝗧𝗘𝗖𝗛`;
+const FOOTER = `\n\n> 🎭 𝗖𝗛𝗔𝗠𝗔 𝗖𝗜𝗡𝗘 𝗛𝗨𝗕 j🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 🇨🇭𝗔𝗠𝗔 𝗧𝗘𝗖𝗛`;
 const REPLY_TIMEOUT = 5 * 60 * 1000; // stop waiting for a reply after 5 minutes
 const HTTP_TIMEOUT = 20000;
 
