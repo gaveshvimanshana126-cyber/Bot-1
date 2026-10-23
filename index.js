@@ -24,7 +24,11 @@ const port = process.env.PORT || 8000;
 
 const prefix = config.PREFIX;
 const ownerNumber = [config.BOT_OWNER];
-const authDir = path.join(__dirname, 'auth_info_baileys');
+const authDir = process.env.AUTH_DIR || path.join(__dirname, 'auth_info_baileys');
+const pairPage = require('./lib/pairpage');
+
+let sock = null;
+let sockReady = false; // true once WhatsApp is ready to give a pairing code
 const credsPath = path.join(authDir, 'creds.json');
 
 // Don't let one bad promise kill the whole bot
@@ -53,8 +57,8 @@ async function ensureSessionFile() {
   }
 
   if (!config.SESSION_ID) {
-    console.error('❌ SESSION_ID env variable is missing. Cannot restore session.');
-    process.exit(1);
+    console.log('🔗 No session found. Open the bot web page and pair with your number.');
+    return setTimeout(connectToWA, 1000);
   }
 
   console.log('🔄 creds.json not found. Downloading session from MEGA...');
@@ -82,7 +86,7 @@ async function connectToWA() {
   const danuwa = makeWASocket({
     logger: P({ level: 'silent' }),
     printQRInTerminal: false,
-    browser: Browsers.macOS('Firefox'),
+    browser: Browsers.macOS('Chrome'),
     auth: state,
     version,
     syncFullHistory: false, // true makes the bot re-process OLD messages
@@ -90,15 +94,19 @@ async function connectToWA() {
     generateHighQualityLinkPreview: true,
   });
 
-  require('./plugins/group').init(danuwa); // anti-delete + group hooks
+  sock = danuwa;
+  sockReady = false;
 
   danuwa.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
+    if (update.qr) sockReady = true; // QR event = ready for pairing code
 
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode;
       if (code === DisconnectReason.loggedOut) {
-        console.error('❌ Logged out. Delete auth_info_baileys and use a new SESSION_ID.');
+        console.error('❌ Logged out. Clearing session, pair again from the web page.');
+        fs.rmSync(authDir, { recursive: true, force: true });
+        setTimeout(connectToWA, 2000);
       } else {
         console.log(`⚠️ Connection closed (code ${code}). Reconnecting in 3s...`);
         setTimeout(connectToWA, 3000);
@@ -225,8 +233,27 @@ async function handleMessage(danuwa, mek) {
 loadPlugins();
 ensureSessionFile();
 
-app.get('/', (req, res) => {
-  res.send('Hey, DANUWA-MD started✅');
+app.get('/', (req, res) => res.send(pairPage));
+
+app.get('/status', (req, res) => {
+  res.json({ linked: !!(sock && sock.authState.creds.registered) });
+});
+
+app.get('/pair', async (req, res) => {
+  const number = String(req.query.number || '').replace(/\D/g, '');
+  if (number.length < 8) return res.status(400).json({ error: 'Invalid number' });
+  if (!sock) return res.status(503).json({ error: 'Bot is starting, try again in a few seconds' });
+  if (sock.authState.creds.registered) return res.json({ error: 'Already linked ✅' });
+
+  for (let i = 0; i < 30 && !sockReady; i++) await new Promise((r) => setTimeout(r, 500));
+  if (!sockReady) return res.status(503).json({ error: 'Not ready yet, try again' });
+
+  try {
+    const code = await sock.requestPairingCode(number);
+    res.json({ code: code.match(/.{1,4}/g).join('-') });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.listen(port, () => console.log(`Server listening on http://localhost:${port}`));
