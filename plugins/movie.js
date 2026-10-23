@@ -6,9 +6,37 @@ const axios = require('axios');
 const API_BASE = 'https://api.chamindu.site';
 const API_KEY = process.env.CINE_API_KEY || 'chama_api_9d3e78236d1d8e63def0761c1831b855';
 const DEFAULT_IMAGE = 'https://api.chamindu.site/logo.png';
-const FOOTER = `\n\n> 🎭 𝗖𝗛𝗔𝗠𝗔 𝗖𝗜𝗡𝗘 𝗛𝗨𝗕 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 🇨🇭𝗔𝗠𝗔 𝗧𝗘𝗖𝗛`;
+
+// ---------- BRANDING (change these two and everything updates) ----------
+const BOT_NAME = 'MOVIEMANIA LK';
+const POWERED_BY = 'Luzzy MD';
+
+const LINE = '━━━━━━━━━━━━━━━━━━━━';
+const FOOTER = `\n\n${LINE}\n*🎬 ${BOT_NAME}*\n> ⚡ Powered by ${POWERED_BY}`;
+
 const REPLY_TIMEOUT = 5 * 60 * 1000; // stop waiting for a reply after 5 minutes
 const HTTP_TIMEOUT = 20000;
+
+// ---------- design helpers ----------
+// A value counts as "empty" if missing / N/A -> that row is simply hidden (no ugly "N/A" lines)
+const clean = (v) => {
+  if (v === undefined || v === null) return null;
+  const t = String(Array.isArray(v) ? v.join(', ') : v).trim();
+  return !t || /^(n\/a|null|undefined|-)$/i.test(t) ? null : t;
+};
+const row = (icon, label, value) => (clean(value) ? `│ ${icon} *${label}:* ${clean(value)}` : null);
+const trimText = (t, max = 260) => {
+  t = clean(t);
+  if (!t) return null;
+  if (t.length <= max) return t;
+  return t.slice(0, max).replace(/\s+\S*$/, '') + '...';
+};
+
+// left-border card (never misaligns, whatever font the phone uses)
+const card = (icon, title, rows = [], tail = '') => {
+  const body = rows.filter(Boolean).join('\n');
+  return `╭─「 ${icon} *${title}* 」\n│${body ? '\n' + body + '\n│' : ''}\n╰──────────────────${tail ? '\n\n' + tail : ''}`;
+};
 
 const pad = (n) => String(n).padStart(2, '0');
 const textOf = (mek) => mek.message?.conversation || mek.message?.extendedTextMessage?.text || '';
@@ -27,7 +55,7 @@ function waitForChoice(socket, { chat, messageId, max, onChoice }) {
 
     const choice = parseInt(textOf(mek), 10) - 1;
     if (isNaN(choice) || choice < 0 || choice >= max) {
-      await socket.sendMessage(chat, { text: `⚠️ *Invalid choice! Range: 01 - ${pad(max)}*` }, { quoted: mek });
+      await socket.sendMessage(chat, { text: `⚠️ *Invalid choice!* Pick a number from 01 to ${pad(max)}.` }, { quoted: mek });
       return; // keep listening
     }
 
@@ -68,12 +96,18 @@ async (socket, msg, m, { from, args }) => {
 
   if (!args.length) {
     return send({
-      text: `*❪ ERROR ❫*\n\n⚠️ *Invalid Usage!*\n\n🎬 *Example:*\n• .cinesubz avatar\n• .cinesubz game of thrones\n\n📝 _Please provide the Movie or Series name!_${FOOTER}`,
+      text: card('⚠️', 'INVALID USAGE', [
+        '│ 🎬 *Examples:*',
+        '│ • .cs avatar',
+        '│ • .cs game of thrones',
+        '│',
+        '│ 📝 _Please type a movie or series name._',
+      ]) + FOOTER,
     });
   }
 
   const query = args.join(' ').trim();
-  await send({ text: `*❪ SEARCHING ❫*\n\n🔍 *Searching CineSubz (CineTV) for:* _${query}_\n⚡ _Please wait a moment..._` });
+  await send({ text: card('🔍', 'SEARCHING', [row('🎯', 'Query', query), '│ ⚡ _Please wait a moment..._']) });
 
   try {
     const res = await axios.get(`${API_BASE}/api/v1/movie/cinesubz/search`, {
@@ -83,16 +117,23 @@ async (socket, msg, m, { from, args }) => {
     const results = res.data?.data || res.data?.results || [];
 
     if (!results.length) {
-      return send({ text: `*❪ NO RESULTS ❫*\n\n😞 *No Results Found on CineSubz (CineTV)!*\n🎬 *Query:* _${query}_${FOOTER}` });
+      return send({
+        text: card('😞', 'NO RESULTS', [row('🎯', 'Query', query), '│ _Nothing found. Check the spelling or try another name._']) + FOOTER,
+      });
     }
 
-    const shown = results.slice(0, 15); // only these are selectable (before: you could pick hidden items)
-    let listText = `*❪ CINESUBZ (CINETV) SEARCH RESULTS ❫*\n\n🎯 *Query:* _${query}_\n📊 *Total:* _${results.length} Items_\n\n*👇 SELECT A NUMBER 👇*\n\n`;
+    const shown = results.slice(0, 15); // only these are selectable
+    const listRows = [
+      row('🎯', 'Query', query),
+      row('📊', 'Found', `${results.length} title${results.length > 1 ? 's' : ''}`),
+      '│',
+    ];
     shown.forEach((item, i) => {
       const icon = isTv(item) ? '📺' : '🎥';
-      listText += `*${pad(i + 1)}* ➜ ${icon} _${(item.title || 'Movie').substring(0, 32)}_ (${item.year || 'N/A'})\n`;
+      const year = clean(item.year) ? ` _(${clean(item.year)})_` : '';
+      listRows.push(`│ *${pad(i + 1)}* ❯ ${icon} ${(item.title || 'Movie').substring(0, 32)}${year}`);
     });
-    listText += `\n📌 _Reply with the number to download!_${FOOTER}`;
+    const listText = card('🔎', 'SEARCH RESULTS', listRows, '👇 _Reply to this message with a number_') + FOOTER;
 
     const sentMsg = await send({ text: listText });
 
@@ -106,50 +147,67 @@ async (socket, msg, m, { from, args }) => {
 
         // ---------------- TV SERIES ----------------
         if (isTv(selected)) {
-          await reply({ text: `*❪ FETCHING ❫*\n\n📺 *Fetching TV Series details from CINESUBZ (CINETV)...*\n⚡ _Please wait..._` });
+          await reply({ text: card('📺', 'FETCHING', ['│ ⚡ _Getting series details..._']) });
           try {
             const tvInfo = await getInfo(selected);
             const episodes = tvInfo.episodes || tvInfo.downloads || [];
+            const tvTitle = tvInfo.title || selected.title;
 
             await reply({
               image: { url: tvInfo.image || selected.image || DEFAULT_IMAGE },
-              caption: `*❪ TV SERIES DETAILS ❫*\n\n📺 *${tvInfo.title || selected.title}*\n⭐ *Rating:* ★ ${tvInfo.rating || tvInfo.imdb || 'N/A'}\n📅 *Year:* ${tvInfo.year || 'N/A'}\n🎬 *Episodes:* ${episodes.length}\n${FOOTER}`,
+              caption: card('📺', 'TV SERIES', [
+                row('🎞️', 'Title', tvTitle),
+                row('⭐', 'Rating', tvInfo.rating || tvInfo.imdb),
+                row('📅', 'Year', tvInfo.year),
+                row('🎬', 'Episodes', episodes.length || null),
+              ]) + FOOTER,
             });
 
             if (episodes.length > 0) {
-              let epText = `*❪ EPISODE DOWNLOADS ❫*\n\n📺 *Series:* _${tvInfo.title || selected.title}_\n\n`;
+              const epRows = [row('📺', 'Series', tvTitle), '│'];
               episodes.slice(0, 15).forEach((ep, i) => {
-                epText += `*Episode ${i + 1}:* ${ep.name || ep.title || 'Episode ' + (i + 1)}\n🔗 ${ep.download_link || ep.link || ep.url}\n\n`;
+                epRows.push(`│ *${pad(i + 1)}* ❯ ${ep.name || ep.title || 'Episode ' + (i + 1)}`);
+                epRows.push(`│ 🔗 ${ep.download_link || ep.link || ep.url}`);
+                epRows.push('│');
               });
-              await reply({ text: epText + FOOTER });
+              epRows.pop(); // remove the last spacer
+              await reply({ text: card('📥', 'EPISODE DOWNLOADS', epRows) + FOOTER });
             }
           } catch (e) {
-            await reply({ text: `❌ *TV Show Error:* ${e.message}${FOOTER}` });
+            await reply({ text: card('❌', 'TV SHOW ERROR', [`│ ${e.message}`]) + FOOTER });
           }
           return;
         }
 
         // ---------------- MOVIE ----------------
-        await reply({ text: `*❪ FETCHING ❫*\n\n🎬 *Fetching Movie details from CineSubz (CineTV)...*\n⚡ _Please wait..._` });
+        await reply({ text: card('🎬', 'FETCHING', ['│ ⚡ _Getting movie details..._']) });
         try {
           const movie = await getInfo(selected);
           const downloads = movie.downloads || [];
           const title = movie.title || selected.title;
-          const story = movie.story ? (movie.story.length > 220 ? movie.story.substring(0, 220) + '...' : movie.story) : 'N/A';
+          const story = trimText(movie.story);
 
           await reply({
             image: { url: movie.image || selected.image || DEFAULT_IMAGE },
-            caption: `*❪ MOVIE DETAILS ❫*\n\n🎬 *${title}*\n⭐ 𝗜𝗠𝗗𝗕 ➜ ★ ${movie.imdb || movie.rating || 'N/A'}\n📅 𝗬𝗲𝗮𝗿 ➜ ${movie.year || 'N/A'}\n⏳ 𝗗𝘂𝗿𝗮𝘁𝗶𝗼𝗻 ➜ ${movie.duration || 'N/A'}\n🌍 𝗖𝗼𝘂𝗻𝘁𝗿𝘆 ➜ ${movie.country || 'N/A'}\n🎭 𝗚𝗲𝗻𝗿𝗲𝘀 ➜ ${Array.isArray(movie.genres) ? movie.genres.join(', ') : (movie.genres || 'N/A')}\n📝 𝗦𝘁𝗼𝗿𝘆 ➜ ${story}\n${FOOTER}`,
+            caption: card('🎬', 'MOVIE DETAILS', [
+              row('🎞️', 'Title', title),
+              row('⭐', 'IMDb', movie.imdb || movie.rating),
+              row('📅', 'Year', movie.year),
+              row('⏳', 'Duration', movie.duration),
+              row('🌍', 'Country', movie.country),
+              row('🎭', 'Genres', movie.genres),
+            ], story ? `📝 *Story*\n_${story}_` : '') + FOOTER,
           });
 
           if (downloads.length === 0) {
-            return reply({ text: `⚠️ *No Direct Downloads available for this movie right now.*${FOOTER}` });
+            return reply({ text: card('⚠️', 'NO DOWNLOADS', ['│ _No direct downloads available right now._']) + FOOTER });
           }
 
-          const qualityText =
-            `*❪ DOWNLOAD QUALITIES ❫*\n\n📥 *Select Quality:*\n\n` +
-            downloads.map((dl, i) => `*${pad(i + 1)}* ➜ 💾 _${dl.quality || 'Direct MP4'}_ (${dl.size || 'Direct'})`).join('\n') +
-            `\n\n📌 _Reply with the number to send file!_${FOOTER}`;
+          const qRows = downloads.map((dl, i) => {
+            const size = clean(dl.size) ? ` • ${clean(dl.size)}` : '';
+            return `│ *${pad(i + 1)}* ❯ 💾 ${dl.quality || 'Direct MP4'}${size}`;
+          });
+          const qualityText = card('📥', 'DOWNLOAD QUALITIES', qRows, '👇 _Reply with a number to get the file_') + FOOTER;
           const dlMsg = await reply({ text: qualityText });
 
           waitForChoice(socket, {
@@ -161,27 +219,39 @@ async (socket, msg, m, { from, args }) => {
               const dlReply = (content) => send(content, dlReplyMek);
               const fileUrl = dl.link || dl.download_link || dl.direct_link;
 
-              if (!fileUrl) return dlReply({ text: '❌ *No download link for this quality.*' });
+              if (!fileUrl) return dlReply({ text: card('❌', 'NO LINK', ['│ _No download link for this quality._']) + FOOTER });
 
-              await dlReply({ text: `*❪ SENDING MOVIE ❫*\n\n📥 *Sending:* _${title}_\n📊 *Quality:* _${dl.quality || 'HD'}_\n⚡ _Uploading file to WhatsApp..._` });
+              await dlReply({
+                text: card('📤', 'SENDING', [
+                  row('🎞️', 'Title', title),
+                  row('📊', 'Quality', dl.quality || 'HD'),
+                  '│ ⚡ _Uploading to WhatsApp, please wait..._',
+                ]),
+              });
               try {
                 await dlReply({
                   document: { url: fileUrl },
                   mimetype: 'video/mp4',
                   fileName: `${title} (${dl.quality || 'HD'}).mp4`,
-                  caption: `*🎬 𝗖𝗛𝗔𝗠𝗔 𝗖𝗜𝗡𝗘 𝗠𝗢𝗩𝗜𝗘 🎬*\n\n🎭 *Title:* ${title}\n📊 *Quality:* ${dl.quality || 'HD'}\n💾 *Size:* ${dl.size || 'Direct'}${FOOTER}`,
+                  caption: card('🎬', BOT_NAME, [
+                    row('🎞️', 'Title', title),
+                    row('📊', 'Quality', dl.quality || 'HD'),
+                    row('💾', 'Size', dl.size),
+                  ]) + FOOTER,
                 });
               } catch (sendErr) {
-                await dlReply({ text: `⚠️ *Direct upload error:* ${sendErr.message}\n\n🔗 *Direct Link:* ${fileUrl}${FOOTER}` });
+                await dlReply({
+                  text: card('⚠️', 'UPLOAD FAILED', [`│ ${sendErr.message}`, '│', `│ 🔗 *Direct link:* ${fileUrl}`]) + FOOTER,
+                });
               }
             },
           });
         } catch (e) {
-          await reply({ text: `❌ *Details Error:* ${e.message}${FOOTER}` });
+          await reply({ text: card('❌', 'DETAILS ERROR', [`│ ${e.message}`]) + FOOTER });
         }
       },
     });
   } catch (err) {
-    await send({ text: `*❪ ERROR ❫*\n\n❌ *Search Error:* ${err.message}${FOOTER}` });
+    await send({ text: card('❌', 'SEARCH ERROR', [`│ ${err.message}`]) + FOOTER });
   }
 });
