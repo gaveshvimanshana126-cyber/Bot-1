@@ -12,7 +12,7 @@ module.exports = {
   // ---------- bot identity (used by .alive) ----------
   BOT_NAME: process.env.BOT_NAME || 'LUZZ-MD',
   CREATOR: process.env.CREATOR || 'Gavesh Vimanshana',
-  BOT_OWNER: process.env.BOT_OWNER || '94776121326', // owner's phone number (country code, no +)
+  BOT_OWNER: process.env.BOT_OWNER || '94742549935', // owner's phone number (country code, no +)
 
   ALIVE_IMG:
     process.env.ALIVE_IMG ||
