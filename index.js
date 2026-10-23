@@ -90,6 +90,8 @@ async function connectToWA() {
     generateHighQualityLinkPreview: true,
   });
 
+  require('./plugins/group').init(danuwa); // anti-delete + group hooks
+
   danuwa.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
 
