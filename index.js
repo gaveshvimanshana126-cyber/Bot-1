@@ -22,7 +22,7 @@ const { commands, replyHandlers } = require('./command');
 const app = express();
 const port = process.env.PORT || 8000;
 
-const prefix = '.';
+const prefix = config.PREFIX;
 const ownerNumber = [config.BOT_OWNER];
 const authDir = path.join(__dirname, 'auth_info_baileys');
 const credsPath = path.join(authDir, 'creds.json');
