@@ -1,11 +1,12 @@
 const { cmd } = require('../command');
 const axios = require('axios');
 
-// API key comes from an env var / GitHub secret (CINE_API_KEY) - never hardcode it in a public repo
+// TODO (after testing): delete the hardcoded fallback key below and use ONLY the CINE_API_KEY env var / GitHub secret.
+// A key written in the code is visible to everyone if the repo is public.
 const API_BASE = 'https://api.chamindu.site';
-const API_KEY = process.env.CINE_API_KEY || '';
+const API_KEY = process.env.CINE_API_KEY || 'chama_api_9d3e78236d1d8e63def0761c1831b855';
 const DEFAULT_IMAGE = 'https://api.chamindu.site/logo.png';
-const FOOTER = `\n\n> 🎭 𝗖𝗛𝗔𝗠𝗔 𝗖𝗜𝗡𝗘 𝗛𝗨𝗕 j🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 🇨🇭𝗔𝗠𝗔 𝗧𝗘𝗖𝗛`;
+const FOOTER = `\n\n> 🎭 𝗖𝗛𝗔𝗠𝗔 𝗖𝗜𝗡𝗘 𝗛𝗨𝗕 🎭\n> 🧬 ᴘᴏᴡᴇʀᴇᴅ ʙʏ 🇨🇭𝗔𝗠𝗔 𝗧𝗘𝗖𝗛`;
 const REPLY_TIMEOUT = 5 * 60 * 1000; // stop waiting for a reply after 5 minutes
 const HTTP_TIMEOUT = 20000;
 
