@@ -1,3 +1,5 @@
+// Node 18 has no global crypto; newer Baileys needs it
+if (!globalThis.crypto) globalThis.crypto = require('crypto').webcrypto;
 const {
   default: makeWASocket,
   useMultiFileAuthState,
