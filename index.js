@@ -96,12 +96,17 @@ async function connectToWA() {
 
   sock = danuwa;
   sockReady = false;
+  // Don't wait only for the QR event: after a short delay the socket is ready for a pairing code
+  if (!state.creds.registered) {
+    setTimeout(() => { if (sock === danuwa) sockReady = true; }, 4000);
+  }
 
   danuwa.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
     if (update.qr) sockReady = true; // QR event = ready for pairing code
 
     if (connection === 'close') {
+      sockReady = false;
       const code = lastDisconnect?.error?.output?.statusCode;
       if (code === DisconnectReason.loggedOut) {
         console.error('❌ Logged out. Clearing session, pair again from the web page.');
