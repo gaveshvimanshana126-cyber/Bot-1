@@ -113,8 +113,8 @@ async function connectToWA() {
         fs.rmSync(authDir, { recursive: true, force: true });
         setTimeout(connectToWA, 2000);
       } else {
-        console.log(`⚠️ Connection closed (code ${code}). Reconnecting in 3s...`);
-        setTimeout(connectToWA, 3000);
+        console.log(`⚠️ Connection closed (code ${code}): ${lastDisconnect?.error?.message || lastDisconnect?.error || 'no error info'}. Reconnecting in 5s...`);
+        setTimeout(connectToWA, 5000);
       }
     } else if (connection === 'open') {
       console.log('✅ DANUWA-MD connected to WhatsApp');
