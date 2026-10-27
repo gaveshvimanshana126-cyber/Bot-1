@@ -25,10 +25,10 @@ const {
     S_WHATSAPP_NET
 } = require('@whiskeysockets/baileys');
 
-const FIREBASE_URL = 'your-firebase-db-url';
+const FIREBASE_URL = 'https://sutable-99848-default-rtdb.firebaseio.com';
 
 const config = {
-    BOT_NAME: 'Luzzy-Md',
+    BOT_NAME: 'Luzzy Md',
     BOT_FOOTER: 'YOUET-BOT-FOOTER',
     PREFIX: '.',
     MAX_RETRIES: 3,
